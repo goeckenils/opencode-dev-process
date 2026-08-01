@@ -63,7 +63,7 @@ describe("reconcile", () => {
   it("marks a running entry stopped when the pid is dead", async () => {
     const { file } = await tmpRegistry()
     await writeRegistry(file, { version: 1, entries: { a: entry({ pid: 999 }) } })
-    const registry = await reconcile(file, async () => "")
+    const registry = await reconcile(file, { maxRetentionSec: 30 }, async () => "")
     expect(registry.entries.a.status).toBe("stopped")
   })
 
@@ -71,8 +71,29 @@ describe("reconcile", () => {
     const { file } = await tmpRegistry()
     await writeRegistry(file, { version: 1, entries: { a: entry({ pid: 1 }) } })
     const output = process.platform === "win32" ? `"1","node.exe"` : "alive"
-    const registry = await reconcile(file, async () => output)
+    const registry = await reconcile(file, { maxRetentionSec: 30 }, async () => output)
     expect(registry.entries.a.status).toBe("running")
+  })
+
+  it("persists the reconciled status back to the registry", async () => {
+    const { file } = await tmpRegistry()
+    await writeRegistry(file, { version: 1, entries: { a: entry({ pid: 999 }) } })
+    await reconcile(file, { maxRetentionSec: 30 }, async () => "")
+    const raw = await fs.readFile(file, "utf8")
+    const persisted = JSON.parse(raw)
+    expect(persisted.entries.a.status).toBe("stopped")
+  })
+
+  it("prunes stopped entries older than the retention window", async () => {
+    const { file } = await tmpRegistry()
+    await writeRegistry(file, {
+      version: 1,
+      entries: {
+        old: entry({ id: "old", status: "stopped", lastSeen: Date.now() - 60000 }),
+      },
+    })
+    const registry = await reconcile(file, { maxRetentionSec: 30 }, async () => "")
+    expect(Object.keys(registry.entries)).not.toContain("old")
   })
 })
 

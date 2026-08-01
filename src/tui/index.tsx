@@ -21,9 +21,12 @@ function View(props: { api: TuiPluginApi; options: Required<Options>; sessionID:
   const [external, setExternal] = createSignal<RegistryEntry[]>([])
   const [collapsed, setCollapsed] = createSignal(false)
 
+  let refreshing = false
   const refresh = async () => {
+    if (refreshing) return
+    refreshing = true
     try {
-      const reconciled = await reconcile(props.options.registryPath)
+      const reconciled = await reconcile(props.options.registryPath, props.options)
       const list = entriesOf(reconciled)
       const now = Date.now()
       setEntries(
@@ -36,6 +39,8 @@ function View(props: { api: TuiPluginApi; options: Required<Options>; sessionID:
       setExternal(await scanExternal(props.options, reconciled))
     } catch {
       // Registry not readable yet; keep the previous view.
+    } finally {
+      refreshing = false
     }
   }
 
@@ -44,8 +49,12 @@ function View(props: { api: TuiPluginApi; options: Required<Options>; sessionID:
   onCleanup(() => clearInterval(timer))
 
   const onKill = async (entry: RegistryEntry) => {
-    await killEntry(props.options.registryPath, entry.id)
-    await refresh()
+    try {
+      await killEntry(props.options.registryPath, entry.id)
+      await refresh()
+    } catch {
+      // Keep the view consistent; the next poll reconciles.
+    }
   }
 
   const onOpenLog = (entry: RegistryEntry) => {

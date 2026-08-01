@@ -55,6 +55,13 @@ describe("detectDevServer", () => {
     ).toMatchObject({ matched: true, port: 3100 })
   })
 
+  it("applies defaultPort when no explicit port is present", () => {
+    expect(detectDevServer({ command: "npm run dev", allowlist, defaultPort: 3100 })).toMatchObject({
+      matched: true,
+      port: 3100,
+    })
+  })
+
   it("matches vite", () => {
     expect(detectDevServer({ command: "vite", allowlist, defaultPort: 3000 })).toMatchObject({
       matched: true,
@@ -65,6 +72,13 @@ describe("detectDevServer", () => {
   it("matches npx next dev", () => {
     expect(detectDevServer({ command: "npx next dev", allowlist, defaultPort: 3000 })).toMatchObject({
       matched: true,
+    })
+  })
+
+  it("matches with an env prefix", () => {
+    expect(detectDevServer({ command: "PORT=5173 vite", allowlist, defaultPort: 3000 })).toMatchObject({
+      matched: true,
+      port: 5173,
     })
   })
 
@@ -82,6 +96,24 @@ describe("detectDevServer", () => {
 
   it("does not match npm run development (prefix collision)", () => {
     expect(detectDevServer({ command: "npm run development", allowlist, defaultPort: 3000 })).toMatchObject({
+      matched: false,
+    })
+  })
+
+  it("does not hijack grep vite", () => {
+    expect(detectDevServer({ command: "grep vite .", allowlist, defaultPort: 3000 })).toMatchObject({
+      matched: false,
+    })
+  })
+
+  it("does not hijack vite build", () => {
+    expect(detectDevServer({ command: "vite build", allowlist, defaultPort: 3000 })).toMatchObject({
+      matched: false,
+    })
+  })
+
+  it("does not hijack nodemon --version", () => {
+    expect(detectDevServer({ command: "nodemon --version", allowlist, defaultPort: 3000 })).toMatchObject({
       matched: false,
     })
   })

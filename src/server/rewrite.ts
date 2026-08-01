@@ -27,22 +27,12 @@ function psQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-/** Builds the PowerShell `.ps1` content for a detached start on Windows. */
-export function buildWindowsScript(input: RewriteInput): string {
+/** Builds the PowerShell `.ps1` content for a detached start on Windows. */export function buildWindowsScript(input: RewriteInput): string {
   const port = input.port
   const lines: string[] = []
   lines.push("$ErrorActionPreference = 'SilentlyContinue'")
   lines.push(`$logOut = ${psQuote(input.logOut)}`)
   lines.push(`$logErr = ${psQuote(input.logErr)}`)
-
-  if (port !== undefined) {
-    lines.push("")
-    lines.push(`# Free the target port if a listener is present`)
-    lines.push(
-      `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ` +
-        `ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
-    )
-  }
 
   lines.push("")
   lines.push("# Start the dev server detached with redirected output")
@@ -88,8 +78,9 @@ export function buildPosixCommand(input: RewriteInput): string {
   const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
   const port = input.port
   const parts: string[] = []
+  // setsid detaches into its own process group so tree-kill (-<pid>) works.
   parts.push(
-    `nohup sh -c ${shQuote(input.command)} > ${shQuote(input.logOut)} 2> ${shQuote(input.logErr)} < /dev/null &`,
+    `setsid nohup sh -c ${shQuote(input.command)} > ${shQuote(input.logOut)} 2> ${shQuote(input.logErr)} < /dev/null &`,
   )
   parts.push(`spawned=$!`)
   if (port !== undefined) {

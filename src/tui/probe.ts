@@ -1,9 +1,8 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import fs from "node:fs/promises"
 import type { Options, Registry, RegistryEntry } from "../shared/types"
 import { resolveOptions } from "../shared/paths"
-import { readRegistry, writeRegistry } from "../server/registry"
+import { pruneRegistry, readRegistry, writeRegistry } from "../server/registry"
 
 const execFileAsync = promisify(execFile)
 
@@ -47,42 +46,54 @@ export async function isPidAlive(pid: number, exec: ExecFn = defaultExec): Promi
 }
 
 /**
- * Reconciles registry liveness against the OS and returns a fresh view.
- * Running entries that are no longer alive become "stopped". Entries whose
- * port is now bound by a different process are also flagged stopped.
+ * Reconciles registry liveness against the OS and persists any status change.
+ * Running entries that are no longer alive become "stopped". Stale stopped
+ * entries are pruned after the retention window.
  */
-export async function reconcile(registryPath: string, exec: ExecFn = defaultExec): Promise<Registry> {
+export async function reconcile(
+  registryPath: string,
+  options: Pick<Required<Options>, "maxRetentionSec">,
+  exec: ExecFn = defaultExec,
+): Promise<Registry> {
   const registry = await readRegistry(registryPath)
+  let changed = false
   for (const entry of Object.values(registry.entries)) {
     if (entry.status !== "running") continue
     const alive = entry.pid ? await isPidAlive(entry.pid, exec) : entry.port ? await isPortListening(entry.port, exec) : false
     if (!alive) {
       entry.status = "stopped"
       entry.lastSeen = Date.now()
+      changed = true
     }
   }
-  return registry
+  if (changed) await writeRegistry(registryPath, registry)
+  // Retire stopped entries older than the retention window.
+  return pruneRegistry(registryPath, options, async (entry) =>
+    entry.pid ? isPidAlive(entry.pid, exec) : entry.port ? isPortListening(entry.port, exec) : false,
+  )
 }
 
-/** Scans configured dev ports for listeners not tracked in the registry. */
+/** Scans configured dev ports for listeners not tracked in the registry (parallel). */
 export async function scanExternal(options: Required<Options>, registry: Registry, exec: ExecFn = defaultExec) {
-  const external: RegistryEntry[] = []
-  for (const port of options.devPorts) {
-    if (Object.values(registry.entries).some((e) => e.port === port)) continue
-    if (await isPortListening(port, exec)) {
-      external.push({
-        id: `external:${port}`,
-        command: `listener on :${port}`,
-        cwd: "",
-        port,
-        status: "running",
-        startedAt: Date.now(),
-        lastSeen: Date.now(),
-        external: true,
-      })
-    }
-  }
-  return external
+  const trackedPorts = new Set(Object.values(registry.entries).map((e) => e.port).filter((p): p is number => p !== undefined))
+  const candidates = options.devPorts.filter((port) => !trackedPorts.has(port))
+
+  const listening = await Promise.all(
+    candidates.map(async (port) => ({ port, up: await isPortListening(port, exec) })),
+  )
+
+  return listening
+    .filter((item) => item.up)
+    .map<RegistryEntry>((item) => ({
+      id: `external:${item.port}`,
+      command: `listener on :${item.port}`,
+      cwd: "",
+      port: item.port,
+      status: "running",
+      startedAt: Date.now(),
+      lastSeen: Date.now(),
+      external: true,
+    }))
 }
 
 /** Kills a process tree by pid and marks the registry entry stopped. */
@@ -94,7 +105,11 @@ export async function killEntry(registryPath: string, id: string, exec: ExecFn =
   if (process.platform === "win32") {
     await exec("taskkill", ["/PID", String(entry.pid), "/T", "/F"], 10000)
   } else {
-    await exec("/bin/sh", ["-c", `kill -TERM -${entry.pid} 2>/dev/null; kill -TERM ${entry.pid} 2>/dev/null`], 5000)
+    await exec(
+      "/bin/sh",
+      ["-c", `kill -TERM -- -${entry.pid} 2>/dev/null; kill -TERM ${entry.pid} 2>/dev/null; pkill -TERM -P ${entry.pid} 2>/dev/null`],
+      5000,
+    )
   }
 
   registry.entries[id] = { ...entry, status: "stopped", lastSeen: Date.now() }
@@ -114,14 +129,4 @@ export function loadOptions(raw: Record<string, unknown> | undefined): Required<
 
 export function entriesOf(registry: Registry): RegistryEntry[] {
   return Object.values(registry.entries)
-}
-
-export async function readEntries(path: string): Promise<RegistryEntry[]> {
-  try {
-    const raw = await fs.readFile(path, "utf8")
-    const parsed = JSON.parse(raw) as Registry
-    return Object.values(parsed.entries ?? {})
-  } catch {
-    return []
-  }
 }

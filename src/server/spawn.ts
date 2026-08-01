@@ -94,12 +94,7 @@ export async function runDetached(
   const exec = options.exec ?? defaultExec
   const invocation = detachedInvocation(process.platform, command)
 
-  let result: ExecResult
-  if (process.platform === "win32") {
-    result = await exec(invocation.command, invocation.args, cwd, timeoutMs)
-  } else {
-    result = await exec(invocation.command, invocation.args, cwd, timeoutMs)
-  }
+  const result = await exec(invocation.command, invocation.args, cwd, timeoutMs)
 
   return parseStartOutput(`${result.stdout}\n${result.stderr}`)
 }
@@ -142,7 +137,14 @@ export async function killProcessTree(pid: number, exec: ExecFn = defaultExec): 
     if (process.platform === "win32") {
       await exec("taskkill", ["/PID", String(pid), "/T", "/F"], os.homedir(), 10000)
     } else {
-      await exec("/bin/sh", ["-c", `kill -TERM -${pid} 2>/dev/null; kill -TERM ${pid} 2>/dev/null`], os.homedir(), 5000)
+      // Target the process group first (setsid gives the process its own group),
+      // then fall back to the process and its direct children.
+      await exec(
+        "/bin/sh",
+        ["-c", `kill -TERM -- -${pid} 2>/dev/null; kill -TERM ${pid} 2>/dev/null; pkill -TERM -P ${pid} 2>/dev/null`],
+        os.homedir(),
+        5000,
+      )
     }
   } catch {
     // Best effort; the registry liveness check reconciles afterwards.

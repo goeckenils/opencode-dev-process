@@ -37,7 +37,8 @@
 - **Kill + logs** — stop a server (kills the whole process tree) or open its
   stdout/stderr log files with one click.
 - **Idempotent** — if a registered server already listens on the target port,
-  the plugin reports "already running" instead of starting a second copy.
+  the plugin leaves the command untouched and reports "already running"
+  instead of starting a second copy.
 - **External listeners** — servers started outside the plugin (on known dev
   ports) show up read-only, so a blocked port is never a mystery.
 - **Cross-platform** — Windows (PowerShell) and macOS/Linux (nohup).

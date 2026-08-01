@@ -16,12 +16,6 @@ const base = {
 }
 
 describe("buildWindowsScript", () => {
-  it("kills an existing listener on the target port", () => {
-    const script = buildWindowsScript(base)
-    expect(script).toContain("Get-NetTCPConnection -LocalPort 3100 -State Listen")
-    expect(script).toContain("Stop-Process -Id $_.OwningProcess -Force")
-  })
-
   it("starts detached with redirects", () => {
     const script = buildWindowsScript(base)
     expect(script).toContain("Start-Process -FilePath 'cmd.exe'")
@@ -30,13 +24,18 @@ describe("buildWindowsScript", () => {
     expect(script).toContain("-WindowStyle Hidden")
   })
 
+  it("does not pre-kill an existing listener (idempotent)", () => {
+    const script = buildWindowsScript(base)
+    expect(script).not.toContain("Stop-Process")
+  })
+
   it("polls the port bounded", () => {
     const script = buildWindowsScript(base)
     expect(script).toContain(`for ($i = 0; $i -lt ${POLL_ATTEMPTS}; $i++)`)
     expect(script).toContain('Write-Output "UP PID $pidFound"')
   })
 
-  it("skips port kill and uses pid fallback when port is unknown", () => {
+  it("skips port poll and uses pid fallback when port is unknown", () => {
     const script = buildWindowsScript({ ...base, port: undefined })
     expect(script).not.toContain("Get-NetTCPConnection")
     expect(script).toContain("Get-Process -Id $p.Id")
@@ -51,17 +50,22 @@ describe("buildWindowsScript", () => {
     })
     expect(script).toContain("C:\\dev\\it''s")
   })
+
+  it("handles commands with embedded double quotes", () => {
+    const script = buildWindowsScript({ ...base, command: 'npm run dev -- --name "my app"' })
+    expect(script).toContain('npm run dev -- --name "my app"')
+  })
 })
 
 describe("buildPosixCommand", () => {
-  it("starts with nohup and redirects", () => {
+  it("starts with setsid nohup and redirects", () => {
     const cmd = buildPosixCommand({
       ...base,
       cwd: "/dev/app",
       logOut: "/logs/id.out.log",
       logErr: "/logs/id.err.log",
     })
-    expect(cmd).toContain("nohup sh -c 'npm run dev -- -p 3100'")
+    expect(cmd).toContain("setsid nohup sh -c 'npm run dev -- -p 3100'")
     expect(cmd).toContain("> '/logs/id.out.log' 2> '/logs/id.err.log'")
     expect(cmd).toContain("&")
   })
@@ -88,7 +92,7 @@ describe("buildRewriteCommand", () => {
 
   it("returns the posix command on linux", () => {
     const result = buildRewriteCommand(base, "linux")
-    expect(result.command).toContain("nohup")
+    expect(result.command).toContain("setsid")
     expect(result.windowsScript).toBeUndefined()
   })
 })
