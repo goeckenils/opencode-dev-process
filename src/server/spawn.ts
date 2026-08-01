@@ -70,6 +70,17 @@ export interface SpawnOptions extends Pick<Required<Options>, "logDir"> {
   exec?: ExecFn
 }
 
+/** Resolves the invocation needed to run a detached-start command on a platform. */
+export function detachedInvocation(
+  platform: NodeJS.Platform,
+  command: string,
+): { command: string; args: string[] } {
+  if (platform === "win32") {
+    return { command: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", command] }
+  }
+  return { command: "/bin/sh", args: ["-c", command] }
+}
+
 /**
  * Runs the generated detached-start command and parses the result.
  * The bash tool never executes the raw command; this runs the rewrite directly.
@@ -81,12 +92,13 @@ export async function runDetached(
   options: SpawnOptions,
 ): Promise<ParsedStart> {
   const exec = options.exec ?? defaultExec
+  const invocation = detachedInvocation(process.platform, command)
 
   let result: ExecResult
   if (process.platform === "win32") {
-    result = await exec("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", command], cwd, timeoutMs)
+    result = await exec(invocation.command, invocation.args, cwd, timeoutMs)
   } else {
-    result = await exec("/bin/sh", ["-c", command], cwd, timeoutMs)
+    result = await exec(invocation.command, invocation.args, cwd, timeoutMs)
   }
 
   return parseStartOutput(`${result.stdout}\n${result.stderr}`)

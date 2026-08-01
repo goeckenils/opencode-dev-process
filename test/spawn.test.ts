@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import path from "path"
 import {
+  detachedInvocation,
   findPortPid,
   isProcessAlive,
   killProcessTree,
@@ -49,11 +50,26 @@ describe("parseStartOutput", () => {
   })
 })
 
+describe("detachedInvocation", () => {
+  it("returns a powershell invocation on win32", () => {
+    const invocation = detachedInvocation("win32", "C:\\logs\\id.ps1")
+    expect(invocation.command).toBe("powershell.exe")
+    expect(invocation.args).toContain("-File")
+    expect(invocation.args).toContain("C:\\logs\\id.ps1")
+  })
+
+  it("returns a sh invocation on posix", () => {
+    const invocation = detachedInvocation("linux", "nohup sh -c 'x' &")
+    expect(invocation.command).toBe("/bin/sh")
+    expect(invocation.args).toEqual(["-c", "nohup sh -c 'x' &"])
+  })
+})
+
 describe("runDetached", () => {
-  it("runs a powershell script on win32", async () => {
-    const exec: ExecFn = async (cmd, args) => {
-      expect(cmd).toBe("powershell.exe")
-      expect(args).toContain("-File")
+  it("runs the invocation and parses the result", async () => {
+    const invocation = detachedInvocation(process.platform, "C:\\logs\\id.ps1")
+    const exec: ExecFn = async (cmd, _args) => {
+      expect(cmd).toBe(invocation.command)
       return { stdout: "UP PID 42\n", stderr: "", exitCode: 0 }
     }
     const result = await runDetached("C:\\logs\\id.ps1", "C:\\dev", 10000, {
