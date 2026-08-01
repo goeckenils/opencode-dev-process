@@ -2,7 +2,7 @@ import os from "os"
 import path from "path"
 import type { Options } from "./types"
 
-const APP_DIR = ".opencode"
+const CONFIG_DIR = "opencode"
 const STATE_FILE = "processes.json"
 const LOG_DIR = "process-logs"
 
@@ -42,8 +42,8 @@ export const DEFAULT_OPTIONS: Required<Options> = {
     "npx next dev",
     "npx vite",
   ],
-  registryPath: path.join(os.homedir(), ".config", APP_DIR, STATE_FILE),
-  logDir: path.join(os.homedir(), ".config", APP_DIR, LOG_DIR),
+  registryPath: path.join(os.homedir(), ".config", CONFIG_DIR, STATE_FILE),
+  logDir: path.join(os.homedir(), ".config", CONFIG_DIR, LOG_DIR),
   maxRetentionSec: 30,
   devPorts: DEFAULT_DEV_PORTS,
   defaultPort: 3000,
