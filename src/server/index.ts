@@ -15,6 +15,9 @@ const MARKER_LOG = "ODP_LOG"
 const MARKER_PORT = "ODP_PORT"
 const MARKER_PID = "ODP_PID"
 
+/** Logger abstraction so tests can capture diagnostic output. */
+export type LogFn = (level: "debug" | "info" | "warn" | "error", message: string, extra?: Record<string, unknown>) => void
+
 interface StartIntent {
   callID: string
   command: string
@@ -54,17 +57,46 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
   const options = resolveOptions(rawOptions as Options)
   const state: DevProcessPlugin = { options, pending: new Map(), idempotent: new Map() }
 
+  const log: LogFn = (level, message, extra) => {
+    // client.app.log is the structured plugin logger. Fall back to console when
+    // the SDK client is not fully wired (tests, early startup).
+    const client = input.client as { app?: { log?: (args: unknown) => Promise<unknown> } } | undefined
+    const fn = client?.app?.log
+    if (fn) {
+      void fn({ body: { service: "opencode-dev-process", level, message, extra } }).catch(() => {})
+    } else {
+      const prefix = `[odp:${level}]`
+      console.log(prefix, message, extra ? JSON.stringify(extra) : "")
+    }
+  }
+
   const ensureLogDir = async () => {
     await fs.mkdir(options.logDir, { recursive: true })
   }
 
   return {
     "tool.execute.before": async (call, output) => {
-      if (call.tool !== "bash") return
+      log("debug", "tool.execute.before fired", { tool: call.tool, sessionID: call.sessionID, callID: call.callID })
+
+      if (call.tool !== "bash") {
+        log("debug", "non-bash tool, skipping", { tool: call.tool })
+        return
+      }
       const command = output.args?.command
-      if (typeof command !== "string") return
+      if (typeof command !== "string") {
+        log("warn", "bash call without string command", { argsKeys: Object.keys(output.args ?? {}) })
+        return
+      }
+      log("debug", "bash command observed", { command, truncated: command.slice(0, 300) })
 
       const detected = detectDevServer({ command, allowlist: options.allowlist, defaultPort: options.defaultPort })
+      log("info", "detectDevServer result", {
+        command,
+        matched: detected.matched,
+        base: detected.base,
+        port: detected.port,
+        canonical: detected.canonical,
+      })
       if (!detected.matched) return
 
       const cwd = output.args?.workdir
@@ -75,6 +107,7 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
       // skip the rewrite entirely and report "already running".
       if (detected.port !== undefined) {
         const existing = await runningOnPort(options, detected.port)
+        log("debug", "idempotency check", { port: detected.port, existing: existing?.pid })
         if (existing?.pid) {
           state.idempotent.set(call.callID, {
             callID: call.callID,
@@ -111,6 +144,12 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
         await fs.writeFile(scriptPath, rewrite.windowsScript, "utf8")
       }
 
+      log("info", "command rewritten to detached start", {
+        original: command,
+        canonical: intent.canonical,
+        rewritten: rewrite.command,
+        scriptPath,
+      })
       output.args.command = rewrite.command
     },
 
@@ -120,16 +159,28 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
       const idempotent = state.idempotent.get(call.callID)
       if (idempotent) {
         state.idempotent.delete(call.callID)
+        log("info", "already running reported", { command: idempotent.command, port: idempotent.port })
         result.output = `✓ ${idempotent.command} is already running on :${idempotent.port} (PID ${idempotent.pid}). Logs: ${options.registryPath}`
         return
       }
 
       const intent = state.pending.get(call.callID)
-      if (!intent) return
+      if (!intent) {
+        log("debug", "tool.execute.after with no pending intent", { callID: call.callID })
+        return
+      }
       state.pending.delete(call.callID)
 
       const parsed = parseStartOutput(result.output)
       const failed = parsed.failed || !parsed.ok
+      log("info", "start result parsed", {
+        callID: call.callID,
+        ok: parsed.ok,
+        upPid: parsed.upPid,
+        spawnedPid: parsed.spawnedPid,
+        failed,
+        output: result.output.slice(0, 200),
+      })
       const entry: RegistryEntry = {
         id: makeId(),
         command: intent.canonical,

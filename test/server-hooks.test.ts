@@ -8,13 +8,21 @@ import { readRegistry, writeRegistry } from "../src/server/registry"
 import type { RegistryEntry } from "../src/shared/types"
 
 async function makePlugin(logDir: string, registryPath: string) {
+  const logs: { level: string; message: string; extra?: Record<string, unknown> }[] = []
+  const client = {
+    app: {
+      log: async ({ body }: { body: { level: string; message: string; extra?: Record<string, unknown> } }) => {
+        logs.push({ level: body.level, message: body.message, extra: body.extra })
+      },
+    },
+  }
   const input = {
     directory: "C:\\dev\\app",
     worktree: "C:\\dev\\app",
     project: {} as any,
     serverUrl: new URL("http://localhost:4096"),
     $: undefined as any,
-    client: {} as any,
+    client: client as any,
     experimental_workspace: { register: () => {} },
   }
   const hooks = (await server(input, {
@@ -23,7 +31,7 @@ async function makePlugin(logDir: string, registryPath: string) {
     allowlist: ["npm run dev"],
     defaultPort: 3000,
   })) as unknown as Hooks
-  return hooks
+  return { hooks, logs }
 }
 
 async function tmpDir(): Promise<{ dir: string; registryPath: string; logDir: string }> {
@@ -34,7 +42,7 @@ async function tmpDir(): Promise<{ dir: string; registryPath: string; logDir: st
 describe("server plugin hook flow", () => {
   it("rewrites a dev-server bash command and records a running entry", async () => {
     const { registryPath, logDir } = await tmpDir()
-    const hooks = await makePlugin(logDir, registryPath)
+    const { hooks } = await makePlugin(logDir, registryPath)
 
     const output = { args: { command: "npm run dev -- -p 3100" } }
     await hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s1", callID: "c1" }, output)
@@ -56,7 +64,7 @@ describe("server plugin hook flow", () => {
 
   it("records a failed start as stopped and flags isError", async () => {
     const { registryPath, logDir } = await tmpDir()
-    const hooks = await makePlugin(logDir, registryPath)
+    const { hooks } = await makePlugin(logDir, registryPath)
 
     const output = { args: { command: "npm run dev" } }
     await hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s1", callID: "c1" }, output)
@@ -88,7 +96,7 @@ describe("server plugin hook flow", () => {
     }
     await writeRegistry(registryPath, { version: 1, entries: { "running-1": existing } })
 
-    const hooks = await makePlugin(logDir, registryPath)
+    const { hooks } = await makePlugin(logDir, registryPath)
     const output = { args: { command: "npm run dev -- -p 3100" } }
     await hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s1", callID: "c1" }, output)
     // The command is left untouched so the tool runs the original (no double start).
@@ -105,7 +113,7 @@ describe("server plugin hook flow", () => {
 
   it("does not leak a stale intent across aborted calls", async () => {
     const { registryPath, logDir } = await tmpDir()
-    const hooks = await makePlugin(logDir, registryPath)
+    const { hooks } = await makePlugin(logDir, registryPath)
 
     // A dev-server call sets an intent but never completes.
     const devOutput = { args: { command: "npm run dev" } }
@@ -125,7 +133,7 @@ describe("server plugin hook flow", () => {
 
   it("leaves non-dev-server commands untouched", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "odp-hook-"))
-    const hooks = await makePlugin(path.join(dir, "logs"), path.join(dir, "processes.json"))
+    const { hooks } = await makePlugin(path.join(dir, "logs"), path.join(dir, "processes.json"))
 
     const output = { args: { command: "git status" } }
     await hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s1", callID: "c1" }, output)
@@ -134,10 +142,34 @@ describe("server plugin hook flow", () => {
 
   it("ignores non-bash tools", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "odp-hook-"))
-    const hooks = await makePlugin(path.join(dir, "logs"), path.join(dir, "processes.json"))
+    const { hooks } = await makePlugin(path.join(dir, "logs"), path.join(dir, "processes.json"))
 
     const output = { args: { command: "npm run dev" } }
     await hooks["tool.execute.before"]!({ tool: "read", sessionID: "s1", callID: "c1" }, output)
     expect(output.args.command).toBe("npm run dev")
+  })
+
+  it("logs diagnostic lines for matched and unmatched commands", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "odp-hook-"))
+    const { hooks, logs } = await makePlugin(path.join(dir, "logs"), path.join(dir, "processes.json"))
+
+    // Matched dev command
+    const devOutput = { args: { command: "npm run dev -- -p 3100" } }
+    await hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s1", callID: "dev" }, devOutput)
+
+    // Unmatched command
+    const otherOutput = { args: { command: "git status" } }
+    await hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s1", callID: "other" }, otherOutput)
+
+    const matched = logs.find((l) => l.message === "detectDevServer result" && l.extra?.matched === true)
+    const unmatched = logs.find((l) => l.message === "detectDevServer result" && l.extra?.matched === false)
+    expect(matched).toBeTruthy()
+    expect(matched?.extra?.base).toBe("npm run dev")
+    expect(unmatched).toBeTruthy()
+    expect(unmatched?.extra?.command).toBe("git status")
+
+    const rewritten = logs.find((l) => l.message === "command rewritten to detached start")
+    expect(rewritten).toBeTruthy()
+    expect(rewritten?.extra?.original).toBe("npm run dev -- -p 3100")
   })
 })
