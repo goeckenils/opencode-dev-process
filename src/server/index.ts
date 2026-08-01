@@ -60,14 +60,19 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
   const log: LogFn = (level, message, extra) => {
     // client.app.log is the structured plugin logger. Fall back to console when
     // the SDK client is not fully wired (tests, early startup).
-    const client = input.client as { app?: { log?: (args: unknown) => Promise<unknown> } } | undefined
-    const fn = client?.app?.log
-    if (fn) {
-      void fn({ body: { service: "opencode-dev-process", level, message, extra } }).catch(() => {})
-    } else {
-      const prefix = `[odp:${level}]`
-      console.log(prefix, message, extra ? JSON.stringify(extra) : "")
+    try {
+      const client = input.client as { app?: { log?: (args: unknown) => Promise<unknown> } } | undefined
+      if (client?.app?.log) {
+        // Call as a method so `this` stays bound to the SDK client. Detaching it
+        // (`const fn = client.app.log; fn(...)`) breaks `this._client`.
+        void client.app.log({ body: { service: "opencode-dev-process", level, message, extra } }).catch(() => {})
+        return
+      }
+    } catch {
+      // Fall through to console if the SDK logger throws.
     }
+    const prefix = `[odp:${level}]`
+    console.log(prefix, message, extra ? JSON.stringify(extra) : "")
   }
 
   const ensureLogDir = async () => {
