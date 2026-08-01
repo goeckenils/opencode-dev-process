@@ -130,6 +130,25 @@ export function unwrapCommand(command: string): string {
       continue
     }
 
+    // PowerShell variable assignment prefix: `$var = "…"; $var = $other; $var = 1; `
+    // Only strip when a Start-Process call or another assignment follows, so a
+    // lone `$x = "npm run dev"` is not mistaken for a dev-server start.
+    const assign = current.match(/^\$[A-Za-z_]\w*\s*=\s*[^;]*;\s*/)
+    if (assign) {
+      const rest = current.slice(assign[0].length)
+      if (/^\$[A-Za-z_]\w*\s*=\s*(?:Start-Process\s|"|'|\$)/i.test(rest) || /^Start-Process/i.test(rest)) {
+        current = rest
+        continue
+      }
+    }
+
+    // $proc = Start-Process … — assignment directly before the call.
+    const spAssign = current.match(/^\$[A-Za-z_]\w*\s*=\s*(Start-Process\s+.*)$/i)
+    if (spAssign?.[1]) {
+      current = spAssign[1]
+      continue
+    }
+
     // & ; | separators at the start
     const sep = current.match(/^[&;|]\s+/)
     if (sep) {

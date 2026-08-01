@@ -49,6 +49,36 @@ describe("unwrapCommand", () => {
       unwrapCommand('cmd /c start /B Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev"'),
     ).toBe("npm run dev")
   })
+
+  it("strips leading variable assignments before Start-Process", () => {
+    expect(
+      unwrapCommand(
+        '$out = "C:\\x\\dev-server.log"; $err = "C:\\x\\dev-server.log.err"; $proc = Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev" -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru; "PID: $($proc.Id)"',
+      ),
+    ).toBe("npm run dev")
+  })
+
+  it("strips a direct assignment before Start-Process", () => {
+    expect(
+      unwrapCommand('$p = Start-Process -FilePath "npx" -ArgumentList "next dev -p 3100"'),
+    ).toBe("npx next dev -p 3100")
+  })
+
+  it("strips multiple assignments with a numeric value", () => {
+    expect(
+      unwrapCommand('$x = 1; $p = Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev"'),
+    ).toBe("npm run dev")
+  })
+
+  it("handles a path with spaces in the assignment value", () => {
+    expect(
+      unwrapCommand('$out = "C:\\My Folder\\dev.log"; $p = Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev"'),
+    ).toBe("npm run dev")
+  })
+
+  it("leaves a lone variable assignment untouched", () => {
+    expect(unwrapCommand('$x = "npm run dev"')).toBe('$x = "npm run dev"')
+  })
 })
 
 describe("tokenizeQuoted", () => {

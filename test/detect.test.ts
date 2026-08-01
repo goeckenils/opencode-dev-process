@@ -188,4 +188,39 @@ describe("detectDevServer with wrappers", () => {
     })
     expect(result.matched).toBe(false)
   })
+
+  it("matches a full PowerShell assignment line around Start-Process", () => {
+    const result = detectDevServer({
+      command:
+        '$out = "C:\\x\\dev-server.log"; $err = "C:\\x\\dev-server.log.err"; $proc = Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev" -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru; "PID: $($proc.Id)"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(true)
+    expect(result.canonical).toContain("npm run dev")
+  })
+
+  it("matches an assignment directly before Start-Process with a port", () => {
+    const result = detectDevServer({
+      command: '$p = Start-Process -FilePath "npx" -ArgumentList "next dev -p 3100"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+  })
+
+  it("does not treat a lone variable assignment as a dev start", () => {
+    const result = detectDevServer({ command: '$x = "npm run dev"', allowlist, defaultPort: 3000 })
+    expect(result.matched).toBe(false)
+  })
+
+  it("does not treat multiple assignments without Start-Process as a dev start", () => {
+    const result = detectDevServer({
+      command: '$x = "npm run dev"; $y = "foo"; $z = "bar"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(false)
+  })
 })

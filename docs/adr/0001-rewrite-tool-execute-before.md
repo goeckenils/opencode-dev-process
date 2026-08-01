@@ -45,3 +45,20 @@ known wrapper prefixes before matching the allowlist:
 The allowlist is still anchored to the command start and the blocklist still
 rejects `vite build`, `nodemon --version`, `npm run test`, `grep vite`, so
 non-dev invocations are not hijacked.
+
+## Update — PowerShell variable-assignment wrappers
+
+Agents also start dev servers with PowerShell one-liners that begin with
+variable assignments instead of the call itself:
+
+```powershell
+$out = "C:\x\dev.log"; $err = "C:\x\dev.log.err";
+$proc = Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev" …
+```
+
+`unwrapCommand` now strips leading `$var = <value>; ` statements (including
+direct `$proc = Start-Process …` assignments) before matching, but **only when
+a Start-Process call or another assignment follows** — a lone
+`$x = "npm run dev"` is never mistaken for a dev-server start. The value may
+contain spaces (quoted paths). Port extraction continues to run on the
+unwrapped command.
