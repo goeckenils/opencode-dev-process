@@ -124,3 +124,68 @@ describe("detectDevServer", () => {
     expect(result.base).toBe("ls -la")
   })
 })
+
+describe("detectDevServer with wrappers", () => {
+  it("matches cmd /c start /B npx next dev with port", () => {
+    const result = detectDevServer({
+      command: 'cmd /c "start /B npx next dev -p 3100"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+    expect(result.canonical).toContain("npx next dev")
+  })
+
+  it("matches bare cmd /c npx next dev", () => {
+    const result = detectDevServer({ command: "cmd /c npx next dev -p 3100", allowlist, defaultPort: 3000 })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+  })
+
+  it("matches Start-Process with npm.cmd argument list", () => {
+    const result = detectDevServer({
+      command: 'Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev","--","-p","3100" -WindowStyle Hidden',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+    expect(result.canonical).toContain("npm run dev")
+  })
+
+  it("matches Start-Process with single-string argument list", () => {
+    const result = detectDevServer({
+      command: 'Start-Process -FilePath "npx" -ArgumentList "next dev -p 3100"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+  })
+
+  it("matches powershell -Command npm run dev", () => {
+    const result = detectDevServer({
+      command: 'powershell.exe -NoProfile -Command "npm run dev -- -p 3100"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+  })
+
+  it("matches a $ prompt echo", () => {
+    const result = detectDevServer({ command: "$ npx next dev -p 3100", allowlist, defaultPort: 3000 })
+    expect(result.matched).toBe(true)
+    expect(result.port).toBe(3100)
+  })
+
+  it("does not match Start-Process for a non-dev command", () => {
+    const result = detectDevServer({
+      command: 'Start-Process -FilePath "npm.cmd" -ArgumentList "run","build"',
+      allowlist,
+      defaultPort: 3000,
+    })
+    expect(result.matched).toBe(false)
+  })
+})

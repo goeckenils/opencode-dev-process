@@ -31,7 +31,9 @@
 
 - **Detached starts** — `npm run dev`, `next dev`, `vite`, `nodemon` and friends
   are rewritten on the fly into non-blocking background launches. The agent
-  shell is released immediately instead of hanging.
+  shell is released immediately instead of hanging. Works even when the agent
+  wraps the command (`cmd /c start /B …`, `Start-Process …`, `powershell
+  -Command "…"`) — no AGENTS.md instruction required.
 - **Live sidebar block** — a "Dev Servers" block in the right sidebar lists
   every running server: command, port, PID, and a status dot. Polls every 3 s.
 - **Kill + logs** — stop a server (kills the whole process tree) or open its

@@ -23,3 +23,25 @@ parses the result and writes the registry.
 back a clean "running on :3100 (PID …)" summary. The trade-off is magic: the
 agent may not realise the process is detached, so the clean summary and the
 sidebar block exist to close that gap.
+
+## Update — wrapper-aware detection (no AGENTS.md instruction required)
+
+The plugin must work without any AGENTS.md instruction telling the agent to
+type a bare `npm run dev`. Real agents wrap dev-server commands in shell
+syntax (`cmd /c start /B …`, `Start-Process -FilePath … -ArgumentList …`,
+`powershell -Command "…"`, `$` prompt echoes). The detection therefore unwraps
+known wrapper prefixes before matching the allowlist:
+
+- `detect.ts` `unwrapCommand` recursively strips `cmd /c`, `start /B`,
+  `powershell -Command/-c`, `&`/`;`/`|` prefixes, `$` prompts, and reconstructs
+  `Start-Process -FilePath X -ArgumentList …` into `X <args…>` (with `.cmd`/
+  `.exe` suffixes normalised). A balanced outer quote pair is stripped last.
+- The port is extracted from the unwrapped command (quotes in the raw command
+  can hide `-p 3100` from the raw regex).
+- `DetectResult.canonical` carries the normalised inner command; the rewrite
+  and registry use it instead of the raw wrapper string, so the generated
+  detached start is clean (no nested `cmd /c start /B`).
+
+The allowlist is still anchored to the command start and the blocklist still
+rejects `vite build`, `nodemon --version`, `npm run test`, `grep vite`, so
+non-dev invocations are not hijacked.

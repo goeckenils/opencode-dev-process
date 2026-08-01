@@ -18,6 +18,7 @@ const MARKER_PID = "ODP_PID"
 interface StartIntent {
   callID: string
   command: string
+  canonical: string
   cwd: string
   port?: number
   logOut: string
@@ -90,10 +91,19 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
 
       const procId = makeId()
       const { logOut, logErr, scriptPath } = resolveLogPaths(options.logDir, procId)
-      const intent: StartIntent = { callID: call.callID, command, cwd, port: detected.port, logOut, logErr, scriptPath }
+      const intent: StartIntent = {
+        callID: call.callID,
+        command,
+        canonical: detected.canonical ?? command,
+        cwd,
+        port: detected.port,
+        logOut,
+        logErr,
+        scriptPath,
+      }
       state.pending.set(call.callID, intent)
       const rewrite = buildRewriteCommand(
-        { command, cwd, logOut, logErr, scriptPath, port: detected.port },
+        { command: intent.canonical, cwd, logOut, logErr, scriptPath, port: detected.port },
         process.platform,
       )
 
@@ -122,7 +132,7 @@ export const server: Plugin = async (input: PluginInput, rawOptions?: Record<str
       const failed = parsed.failed || !parsed.ok
       const entry: RegistryEntry = {
         id: makeId(),
-        command: intent.command,
+        command: intent.canonical,
         cwd: intent.cwd,
         port: intent.port,
         pid: failed ? undefined : parsed.upPid ?? parsed.spawnedPid,
