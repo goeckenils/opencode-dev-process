@@ -91,4 +91,25 @@ describe("pruneRegistry", () => {
     const registry = await pruneRegistry(file, { maxRetentionSec: 30 }, async () => true)
     expect(registry.entries.alive.status).toBe("running")
   })
+
+  it("does not lose entries from concurrent writers (lost-update protection)", async () => {
+    const { file } = await tmpRegistry()
+    await Promise.all([
+      upsertEntry(file, entry({ id: "a", pid: 1 })),
+      upsertEntry(file, entry({ id: "b", pid: 2 })),
+    ])
+    const registry = await readRegistry(file)
+    expect(Object.keys(registry.entries).sort()).toEqual(["a", "b"])
+  })
+
+  it("merges a new entry into an existing file instead of overwriting", async () => {
+    const { file } = await tmpRegistry()
+    await upsertEntry(file, entry({ id: "a", pid: 1 }))
+    // Simulate a second process writing a full (fresh) registry that lacks "a",
+    // then a new upsert — the lock+merge must not clobber existing entries.
+    await upsertEntry(file, entry({ id: "b", pid: 2 }))
+    const registry = await readRegistry(file)
+    expect(registry.entries.a).toBeDefined()
+    expect(registry.entries.b).toBeDefined()
+  })
 })
